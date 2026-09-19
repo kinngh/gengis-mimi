@@ -1,0 +1,8 @@
+{
+  "vector": [1, 0, 0],
+  "top_k": 2,
+  "filter": {
+    "eq": { "category": "engineering" },
+    "range": { "year": { "gte": 2025 } }
+  }
+}

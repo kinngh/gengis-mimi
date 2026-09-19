@@ -1,0 +1,19 @@
+{
+  "upsert": [
+    {
+      "id": "rust",
+      "vector": [1, 0, 0],
+      "attributes": { "title": "Building a database in Rust", "category": "engineering", "year": 2026 }
+    },
+    {
+      "id": "object_storage",
+      "vector": [0.8, 0.2, 0],
+      "attributes": { "title": "Durable data in object storage", "category": "engineering", "year": 2025 }
+    },
+    {
+      "id": "cooking",
+      "vector": [0, 0, 1],
+      "attributes": { "title": "A very good soup", "category": "cooking", "year": 2026 }
+    }
+  ]
+}

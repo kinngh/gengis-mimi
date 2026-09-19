@@ -1,0 +1,13 @@
+[server]
+bind = "127.0.0.1:7878"
+
+[storage]
+type = "s3"
+bucket = "replace-with-your-bucket"
+region = "us-east-1"
+
+[database]
+prefix = "gengis-mimi/v1"
+wal_flush_ms = 100
+cache_dir = "./.cache/s3"
+cache_bytes = 536870912

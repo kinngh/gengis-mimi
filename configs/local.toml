@@ -1,0 +1,12 @@
+# Run from the repository root. Paths are relative to the working directory.
+[server]
+bind = "127.0.0.1:7878"
+max_concurrent_queries = 4
+
+[storage]
+type = "local"
+path = "./data"
+
+[database]
+prefix = "gengis-mimi/v1"
+wal_flush_ms = 100
