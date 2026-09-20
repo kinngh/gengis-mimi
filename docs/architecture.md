@@ -18,6 +18,8 @@ Query → one durable snapshot → indexed candidates + pending changes → top 
 
 Each application write holds a commit mutex through `await_durable()`. A cancelled HTTP request leaves that commit task running with the mutex held. Snapshot creation briefly acquires the same mutex, so a query reading several keys cannot mix values from a partially durable application commit. A request that began after a successful write sees that write; a request overlapping a write can observe the earlier snapshot.
 
+The mutex is shared by every namespace in a shard. A write waiting for storage can therefore delay other writes and new query snapshots in that shard. Queries that already hold a snapshot can continue. Improving concurrency requires preserving the durable snapshot boundary when changing this serialization.
+
 Writes return both a SlateDB `sequence` and a namespace `revision`. The namespace revision increments once per accepted batch and is the search indexing watermark. These counters have different purposes and are not interchangeable.
 
 ## Logical keys, format 2
@@ -45,6 +47,8 @@ Attributes and vectors, pending changes, and quota counters commit in one batch.
 
 Index builds read a snapshot without blocking foreground writes for the duration of training. They write new generation keys, wait for every block to become durable, then publish one pointer. Queries use the pointer and primary data from their own snapshot. Newer changed IDs suppress stale index entries, and their current values participate in ranking.
 
+The current builder reads the entire namespace into memory and rebuilds all its search indexes when there are pending changes. A shard's builds run serially under a maintenance mutex and share the active worker's resources with queries and writes. Small updates can consequently trigger substantial rebuilding, and indexing lag increases the pending work searched by queries. Incremental maintenance is the first [engine priority](roadmap.md#engine-priorities).
+
 [The indexing protocol](indexing.md) explains the publication and cleanup invariants. Exact mode bypasses derived indexes and provides a reference result for recall checks.
 
 ## Storage and cache
@@ -57,6 +61,10 @@ S3 uses ETag conditional writes, path-style addressing, and the object-store cre
 
 Standalone mode opens one writer. Cluster mode uses independently owned shard prefixes. The gateway places a whole namespace on a fixed shard and forwards reads to that shard's active writer. Each namespace query therefore obtains its snapshot at the owner, with no asynchronously refreshed reader replica involved.
 
+A cached read at that owner can use its durable snapshot without a new object-store freshness check for each query. Cache misses and waiting for a commit can still add storage latency. This keeps read coordination simple while concentrating a shard's query traffic on one worker.
+
 A standby opens SlateDB only after winning the ownership CAS. The open fences the old writer before the standby starts serving. Worker HTTP admission also checks the lease deadline and SlateDB status. See [cluster deployment](cluster.md).
+
+Independent indexing/query workers are planned, not present tiers. An external indexer cannot open another writer on the same prefix without fencing the owner. It needs a job and publication protocol; independent readers additionally need committed revision selection and pending-change coverage. Those changes must preserve the current snapshot and read-after-write semantics.
 
 Atomicity is within a batch and namespace. There are no cross-shard transactions, and a paginated scan consists of separate snapshots. A [backup export](backups.md) pins one snapshot for its entire stream.

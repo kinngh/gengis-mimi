@@ -42,4 +42,17 @@ Repeat with probes 4, 8, 16, and at least the cluster count. More probing should
 
 Compaction amplification needs sustained repeated updates, not only a fresh bulk load. Compare cumulative accepted object bytes with application bytes written over the same observation window, and inspect compactor counters. The S3 integration test forces compaction progress and verifies recovery after GC, but its short duration is not a long-running soak test.
 
+## Planned workload coverage
+
+The current example generates synthetic vectors and runs sequential queries. The following scenarios require harness extensions; they have not been established by the 0.2.0 report.
+
+| Workload | Evidence to collect |
+| --- | --- |
+| Project-document search | Record extraction/chunking rules, embedding model and dimensions, corpus size, and fixed queries. Measure ANN recall against exact retrieval; separately judge whether results answer the query. |
+| Ongoing edits and deletions | Replay mutations during indexing and queries. Record commit latency, indexing lag, bytes rewritten, query p99, and stale-result checks at known revisions. |
+| Filtered vectors and common text terms | Vary filter selectivity and its correlation with vector proximity; include frequent BM25 terms. Record candidate/posting counts, recall, memory, and bytes read. |
+| Multiple callers and larger-than-cache data | Exercise HTTP and embedded paths separately, including multiple namespaces. Record queueing, CPU/RSS, errors, object-store distance, and exactly which caches were cleared or remained warm. |
+
+Keep dataset and recall targets fixed when comparing index changes. Include any warmup, rebuilding, or cache population outside the timed query window in the report. These measurements should guide the [engine priorities](roadmap.md#engine-priorities) before making capacity or latency claims.
+
 Store release measurements in `docs/benchmark/<version>.md`, matching the package version in `Cargo.toml`. The [0.2.0 report](benchmark/0.2.0.md) records measured local and MinIO latency, recall, memory, throughput, and I/O, including a full-probe control. Keep earlier reports when adding a new version so changes remain comparable. These are development references rather than capacity promises; correctness checks are recorded separately in [validation](validation.md).

@@ -6,6 +6,16 @@ GM acknowledges writes after durable storage commits them. It supports exact vec
 
 This is an early implementation with tested recovery paths and measurable limits. Indexes currently rebuild a namespace in memory; large-scale performance depends on your data, filters, probing settings, and storage. See [current boundaries](docs/roadmap.md) and [benchmarks](docs/benchmarks.md).
 
+## Where GM fits
+
+The first target workload is private search over a project's notes and documentation: a modest collection, mostly reads, and occasional batched updates. Semantic search can find explanations with different wording; BM25 finds relevant terms; metadata filters narrow results by document type or modification date. One namespace per project keeps each collection independently searchable.
+
+Run locally with filesystem storage, use your own S3/MinIO deployment, or [embed the Rust engine](docs/development.md#modules) directly in an application. Local mode can operate offline after installation when the application also processes documents and generates embeddings locally. MIT-licensed source and control over deployment, indexing, and cache settings make GM useful for applications that need to own their search stack.
+
+The application supplies file import, text extraction/chunking, embeddings, and a search interface. Combining vector and keyword rankings also happens in the application today. These form a useful first demo; GM currently supplies the storage and retrieval engine.
+
+Collection size needs validation with real document chunks and embedding dimensions. The [0.2.0 measurements](docs/benchmark/0.2.0.md) cover 5,000 synthetic 32-dimensional vectors on one host. They establish a development baseline; they do not establish production capacity or a performance advantage over other databases.
+
 ## Start locally
 
 ```sh
