@@ -1,0 +1,7 @@
+# Disposable local benchmark data; independent of the normal server's ./data.
+[storage]
+type = "local"
+path = "./target/benchmark-data"
+[database]
+wal_flush_ms = 5
+cache_dir = "./target/benchmark-cache"

@@ -20,6 +20,7 @@ async fn durable_documents_tombstones_and_namespaces_survive_reopen_without_cach
             NamespaceConfig {
                 dimensions: Some(2),
                 metric: Metric::Cosine,
+                text_fields: vec![],
             },
         )
         .await
@@ -239,6 +240,7 @@ async fn metric_scores_have_consistent_order_and_document_only_namespaces_work()
                 NamespaceConfig {
                     dimensions: Some(2),
                     metric,
+                    text_fields: vec![],
                 },
             )
             .await
@@ -295,6 +297,7 @@ async fn namespace_creation_is_serialized_and_local_directory_has_one_owner() {
                     NamespaceConfig {
                         dimensions: Some(dimensions),
                         metric: Metric::Cosine,
+                        text_fields: vec![],
                     },
                 )
                 .await

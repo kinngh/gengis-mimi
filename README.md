@@ -1,87 +1,87 @@
 # Gengis Mimi
 
-An object-storage-backed document and vector database, written in Rust and built on [SlateDB](https://slatedb.io/).
+An object-storage database for documents, vectors, and full-text search. Written in Rust on [SlateDB](https://slatedb.io/).
 
-Gengis Mimi runs as one HTTP server. SlateDB stores its WAL, manifests, and immutable tables in your object store. The server acknowledges writes only after they reach durable storage. RAM and the optional disk cache can be discarded.
+GM acknowledges writes after durable storage commits them. It supports exact vector search, centroid ANN, indexed metadata filtering, and BM25. Background indexing preserves the visibility of new writes and deletes. Run one server locally, or deploy a gateway over S3 shards with active/standby workers.
 
-**This is an early, working foundation:** atomic document batches, namespaces, consistent reads, and exact vector search. Search currently scans the namespace; ANN, full-text search, and distributed serving are future work. 
+This is an early implementation with tested recovery paths and measurable limits. Indexes currently rebuild a namespace in memory; large-scale performance depends on your data, filters, probing settings, and storage. See [current boundaries](docs/roadmap.md) and [benchmarks](docs/benchmarks.md).
 
-## Run locally
-
-Use a recent stable Rust toolchain and a native C/C++ build toolchain for dependencies. Development is currently verified with Rust 1.98.1.
+## Start locally
 
 ```sh
 cargo run --release --locked -- --config configs/local.toml
 ```
 
-The server listens at `http://127.0.0.1:7878`. Durable files go in `./data`. Running without `--config` uses the same defaults. All relative paths resolve from your working directory.
-
-In another terminal, from this folder:
+A current Rust toolchain and native build tools are required. Development is verified with Rust 1.98.1. The server listens on `127.0.0.1:7878`; durable data goes in `./data`. All relative paths use the current working directory.
 
 ```sh
-# Create a namespace with three-dimensional cosine vectors.
 curl --fail-with-body -X PUT http://127.0.0.1:7878/v1/namespaces/demo \
   -H 'Content-Type: application/json' \
-  -d '{"dimensions":3,"metric":"cosine"}'
+  -d '{"dimensions":3,"metric":"cosine","text_fields":["title"]}'
 
-# Atomically insert three documents.
 curl --fail-with-body http://127.0.0.1:7878/v1/namespaces/demo/write \
-  -H 'Content-Type: application/json' \
-  --data-binary @examples/documents.json
+  -H 'Content-Type: application/json' --data-binary @examples/documents.json
 
-# Search with attribute filters.
+# An explicit rebuild makes the example deterministic. The server also indexes
+# pending writes automatically every five seconds.
+curl --fail-with-body -X POST http://127.0.0.1:7878/v1/namespaces/demo/index
+
 curl --fail-with-body http://127.0.0.1:7878/v1/namespaces/demo/query \
-  -H 'Content-Type: application/json' \
-  --data-binary @examples/query.json
+  -H 'Content-Type: application/json' --data-binary @examples/query.json
 
-# Retrieve, scan, and delete documents.
-curl --fail-with-body http://127.0.0.1:7878/v1/namespaces/demo/documents/rust
-curl --fail-with-body 'http://127.0.0.1:7878/v1/namespaces/demo/documents?limit=2'
-curl --fail-with-body -X DELETE http://127.0.0.1:7878/v1/namespaces/demo/documents/cooking
+curl --fail-with-body http://127.0.0.1:7878/v1/namespaces/demo/search \
+  -H 'Content-Type: application/json' \
+  -d '{"field":"title","text":"Rust storage","top_k":2}'
 ```
 
-The example vectors are hand-written for demonstration. Applications supply their own embeddings. Stop with Ctrl-C; restart with the same config to reopen the database.
+Vectors in the examples are illustrative; applications provide embeddings. Namespace schemas are immutable. If `demo` already exists with a different schema, use a new namespace name.
 
-## What works
+## Included
 
-- Immutable namespace configuration, with optional vector dimensions.
-- Full-document upserts and deletes in one atomic batch.
-- Document retrieval and cursor-based scans.
-- Exact cosine, dot-product, and squared Euclidean ranking.
-- Equality and inclusive numeric-range filters applied before ranking.
-- Durable reads and a consistent snapshot for each query or scan page.
-- Local filesystem storage with `fsync`, or S3-compatible object storage.
-- Optional bounded disk cache, background compaction, and storage cleanup through SlateDB.
-- Bounded query concurrency, request-size limits, optional bearer authentication, and graceful shutdown.
+- Atomic document upserts/deletes, namespaces, pagination, and snapshot reads.
+- Checksummed binary vectors and centroid blocks; cosine, dot product, and squared Euclidean scores.
+- Exact search as a recall reference; ANN with configurable cluster probes.
+- Equality/numeric postings, selective-filter planning, and BM25 text postings.
+- Durable pending changes, atomic index publication, background rebuilds, and safe generation cleanup.
+- Local filesystem or S3 storage, optional disk cache, compaction, and object GC.
+- Checksummed online backups, empty-database restore, and resumable v1-to-v2 migration.
+- Namespace quotas, scoped bearer tokens, request deadlines, Prometheus metrics, and graceful shutdown.
+- Fixed namespace shards, a gateway, and active/standby worker takeover using object-store CAS and SlateDB fencing.
 
-## S3 and MinIO
+## S3 and deployment
 
-`configs/minio.toml` is ready for a MinIO server at `127.0.0.1:9000` and a pre-created `gengis-mimi` bucket. `configs/s3.toml` is the AWS example. Credentials come from the environment or the object-store client's credential provider; they do not belong in TOML.
+[MinIO setup](docs/minio.md) uses an existing bucket and environment credentials. [Cluster deployment](docs/cluster.md) includes complete example configurations. Start with one server; cluster mode requires S3 conditional writes and a fixed shard topology.
 
-See [the MinIO guide](docs/minio.md) for setup, credentials, and the opt-in integration test. A MinIO instance is not included or started by this project.
+For a database created by v0.1, stop its server, make an offline copy, then run:
+
+```sh
+cargo run --release --locked -- --config configs/local.toml migrate
+```
+
+The object prefix remains unchanged; the format marker inside the database selects the encoding. See [backup and migration](docs/backups.md).
 
 ## Documentation
 
 | Guide | Contents |
 | --- | --- |
-| [API](docs/api.md) | Routes, payloads, filters, scores, pagination, limits, errors |
-| [Architecture](docs/architecture.md) | Storage layout, durability, snapshots, SlateDB responsibilities |
-| [Configuration and operations](docs/operations.md) | Settings, cache ownership, authentication, recovery, backups |
-| [MinIO / S3](docs/minio.md) | Connection setup and optional backend test |
-| [Development](docs/development.md) | Code map, checks, integration tests, design rules |
-| [Roadmap](docs/roadmap.md) | Boundaries of v0.1 and next milestones |
+| [API](docs/api.md) | Routes, payloads, query plans, filters, ranking, limits |
+| [Architecture](docs/architecture.md) | Durability, snapshots, keyspace, and storage responsibilities |
+| [Indexing](docs/indexing.md) | Binary blocks, centroid training, publication, overlays, BM25 |
+| [Operations](docs/operations.md) | Configuration, authentication, quotas, metrics, recovery |
+| [Backups](docs/backups.md) | Online export, verified restore, retention, format migration |
+| [Cluster](docs/cluster.md) | Placement, leases, failover, gateway behavior, limitations |
+| [MinIO / S3](docs/minio.md) | Credentials, connection setup, backend validation |
+| [Benchmarks](docs/benchmarks.md) | Reproducible ingestion, latency, recall, I/O measurements |
+| [0.2.0 results](docs/benchmark/0.2.0.md) | Measured local/MinIO benchmarks, environment, commands, and limitations |
+| [Development](docs/development.md) | Module map and local validation |
+| [Roadmap](docs/roadmap.md) | Implemented capabilities and remaining engineering work |
 
-## Development
+## Validate locally
 
 ```sh
-cargo fmt --all -- --check
-cargo clippy --locked --all-targets -- -D warnings
-cargo test --locked --all-targets
-cargo doc --locked --no-deps
+./scripts/check.sh
 ```
 
-Tests cover recovery after an abrupt process kill, empty-cache reopening, atomic batches, namespace isolation, durable visibility, concurrent queries/writes, ranking, and HTTP behavior. S3 tests are opt-in and require a bucket.
+Tests cover crash recovery, stalled storage, cancelled writes, concurrent index publication, ranking, filters, BM25 corpus updates, backup corruption, migration, and quotas. Opt-in S3 tests additionally exercise fencing, compaction/GC, gateway routing, authorization, and standby takeover after a process kill.
 
-For normal deployment, build with `cargo build --release --locked` and run `target/release/gengis-mimi`. Run one server per database prefix. The local data directory is the durable backend; deleting it deletes the database. With S3, only the separately configured cache is disposable.
-
-MIT licensed. See [LICENSE](LICENSE).
+Build the server with `cargo build --release --locked`. The executable is `target/release/gengis-mimi`. MIT licensed; see [LICENSE](LICENSE).

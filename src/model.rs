@@ -43,10 +43,28 @@ pub struct NamespaceConfig {
     pub dimensions: Option<usize>,
     #[serde(default)]
     pub metric: Metric,
+    /// Top-level string attributes tokenized for BM25.
+    #[serde(default)]
+    pub text_fields: Vec<String>,
 }
 
 impl NamespaceConfig {
     pub fn validate(&self) -> Result<()> {
+        if self.text_fields.len() > 16 {
+            return Err(Error::Invalid("at most 16 text fields are allowed".into()));
+        }
+        for field in &self.text_fields {
+            validate_id(field)?;
+        }
+        if self
+            .text_fields
+            .iter()
+            .collect::<std::collections::HashSet<_>>()
+            .len()
+            != self.text_fields.len()
+        {
+            return Err(Error::Invalid("text_fields must be unique".into()));
+        }
         if self
             .dimensions
             .is_some_and(|d| !(1..=MAX_DIMENSIONS).contains(&d))
@@ -107,6 +125,7 @@ pub struct WriteResult {
     pub upserted: usize,
     pub deleted: usize,
     pub sequence: u64,
+    pub revision: u64,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -171,6 +190,41 @@ pub struct QueryRequest {
     pub top_k: usize,
     #[serde(default)]
     pub filter: Filter,
+    #[serde(default)]
+    pub mode: SearchMode,
+    #[serde(default = "default_probes")]
+    pub probes: usize,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SearchMode {
+    #[default]
+    Auto,
+    Exact,
+    Ann,
+}
+fn default_probes() -> usize {
+    4
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TextQuery {
+    pub field: String,
+    pub text: String,
+    #[serde(default = "default_top_k")]
+    pub top_k: usize,
+    #[serde(default)]
+    pub filter: Filter,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct NamespaceStats {
+    pub revision: u64,
+    pub documents: u64,
+    pub bytes: u64,
+    pub pending_documents: u64,
 }
 
 fn default_top_k() -> usize {
@@ -189,6 +243,9 @@ pub struct SearchHit {
 pub struct QueryResult {
     pub matches: Vec<SearchHit>,
     pub scanned_documents: usize,
+    pub plan: String,
+    pub revision: u64,
+    pub indexed_revision: u64,
 }
 
 #[derive(Debug, Deserialize)]

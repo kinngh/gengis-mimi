@@ -1,67 +1,57 @@
 # Development
 
-## Build and check
-
-Use a current stable Rust toolchain; this implementation was built with Rust 1.98.1. Cargo declares a 1.89 language baseline, but that older toolchain is not currently tested. Native dependencies may need a C/C++ compiler, CMake, and platform build tools. macOS development uses Xcode Command Line Tools; Linux builds typically use build-essential, CMake, and pkg-config.
+## Local checks
 
 ```sh
-cargo build --locked
-cargo fmt --all -- --check
-cargo clippy --locked --all-targets -- -D warnings
-cargo test --locked --all-targets
-cargo doc --locked --no-deps
+./scripts/check.sh
+# With credentials and an existing test bucket:
+./scripts/check-s3.sh
+cargo build --release --locked --bins --examples
 ```
 
-`cargo build --release --locked` produces `target/release/gengis-mimi`. Run from this directory to use the example configs unchanged. The first build downloads and compiles SlateDB's dependency tree.
+The check scripts keep Cargo downloads in `.cargo-home` and temporary files in `.tmp`, both ignored. They run formatting, Clippy with warnings denied, all default tests, and Rustdoc. S3/cluster tests are opt-in. Native dependencies require C/C++ build tools and CMake as appropriate for your platform.
 
-To keep Cargo's downloads and temporary build files inside the repository as well:
+Development is verified with Rust 1.98.1 on macOS ARM64. Cargo declares a Rust 1.89 baseline, which has not separately been verified. The exact SlateDB version and lockfile are pinned. Use a recent stable compiler for the documented checks.
 
-```sh
-mkdir -p .cargo-home .tmp
-CARGO_HOME="$PWD/.cargo-home" TMPDIR="$PWD/.tmp" cargo test --locked --all-targets
-```
+## Modules
 
-Both directories are ignored by Git, as are `target`, local data, and cache files. Cargo.lock is checked in because this is a runnable database service.
-
-## Code map
-
-| File | Responsibility |
+| Module | Responsibility |
 | --- | --- |
-| `src/main.rs` | CLI, logging, startup, listener, shutdown |
-| `src/config.rs` | TOML schema, defaults, validation |
-| `src/engine.rs` | Backend setup, durable writes, namespaces, snapshots, scans |
-| `src/model.rs` | API data types, ID/vector/filter validation |
-| `src/search.rs` | Exact distance kernels and bounded top-K heap |
-| `src/api.rs` | HTTP routes, bearer auth, request admission |
-| `src/error.rs` | Application errors and HTTP mapping |
+| `main.rs` | Serve/backup/restore/migrate/reindex CLI, startup/shutdown |
+| `config.rs` | Typed configuration and backend builder |
+| `engine.rs` | Commit serialization, snapshots, namespace lifecycle, quotas, index publication |
+| `binary.rs` | Versioned, checksummed vector blocks |
+| `index.rs` | Centroid training, block/posting construction, tokenization |
+| `search.rs` | Exact/ANN plans, pending-change overlay, filters, BM25 |
+| `backup.rs` | Consistent export, validation, restore, resumable migration |
+| `cluster.rs` | Gateway placement, lease ownership, standby takeover |
+| `api.rs` | HTTP contract, scoped tokens, admission, deadlines |
+| `metrics.rs` | Prometheus exposition over SlateDB/application metrics |
+| `examples/benchmark.rs` | Seeded ingestion/search/recall measurements |
 
-The library exports `Engine`, `Config` through `config`, and document/query types through `model`. The HTTP layer calls those same operations. Close the engine explicitly after draining its callers.
+The library exposes `Engine` and API types. `Engine::open_with_store` supports embedded/custom stores and deterministic fault injection. The embedded API does not automatically start an indexer: call `run_indexer` with a stop watch receiver or explicitly rebuild. The server CLI starts the indexer automatically. Drain callers, stop background work, and call `close` explicitly.
 
-## Tests worth maintaining
+## Tests and invariants
 
-The test suite focuses on database guarantees:
+Tests focus on behavior that could lose data or return incorrect search results:
 
-- Reads and searches hide updates and tombstones until the WAL is durable.
-- Acknowledged writes survive an actual child-process kill and restart with an empty cache.
-- Invalid batches do not partly apply.
-- Namespace key ranges and pagination never spill into neighboring namespaces.
-- Updates, deletes, filters, tie-breaking, and each distance metric affect ranking correctly.
-- Queries stay internally consistent while whole-document batches change concurrently.
-- Conflicting namespace creation has one winner; local directories have one owner.
-- HTTP authentication, limits, serialization, and status codes match the documented contract.
+- Atomic batches, namespace isolation, durable reopen, and actual process kill recovery.
+- A stalled WAL cannot acknowledge; a cancelled writer retains commit serialization until durability.
+- Concurrent queries never observe a partial application batch.
+- All-cluster ANN equals exact results, filters narrow candidates, updates/deletes remain visible during rebuilding, and indexed results survive reopen.
+- BM25 statistics and scores agree before and after rebuilding across mutations.
+- Quota rejection leaves the whole batch unchanged.
+- Snapshot backups retain the captured version despite later writes/cleanup; corrupt files leave restore destinations untouched.
+- Migration resumes with a mixture of legacy JSON and converted binary vectors.
+- Vector decoding rejects malformed/checksum-invalid/nonfinite data.
+- S3 fencing, compaction progress, offline GC, gateway authorization, and standby recovery.
 
-Local tests use unique directories under `target/test-data` and clean them up. The process test launches the built binary on loopback, writes through HTTP, uses `Child::kill`, removes only its disposable cache, and checks recovery over HTTP. This proves the exercised acknowledged-write path survives abrupt process termination; it is not an exhaustive distributed-systems fault campaign.
+Filesystem tests create and clean unique directories under `target/test-data`. Process tests bind loopback and clean up their child processes. S3 fixtures intentionally retain unique object prefixes for inspection. A passing suite establishes these tested behaviors; it is not a proof against all distributed failure schedules.
 
-The S3 test is ignored by default and must be invoked explicitly with an existing bucket. See [MinIO](minio.md).
+## Design rules
 
-## Implementation rules
+Keep application mutations in the durable batch with their change record and counters. Preserve the snapshot boundary across index metadata, candidate retrieval, pending changes, and result hydration. Publish indexes only after all referenced blocks are durable. Retire generations through SlateDB writes, preserving snapshot protection.
 
-Keep one package until a module needs an independent boundary. Prefer SlateDB and standard-library facilities to duplicate storage machinery. Do not introduce a second WAL or hand-edit SlateDB objects. Keep vectors validated at the write boundary, and ensure new query paths honor tombstones and the same snapshot as their source documents.
+Keep exact search as a reference when changing approximate retrieval. Measure recall, cold/warm latency, transfer volume, and memory before adding optimization layers. Keep externally visible behavior and format changes explicit; avoid hiding data movement behind a topology change or silently adopting an older schema.
 
-Before adding ANN, retain exact search as an oracle and measure recall, cold/warm latency, bytes fetched, and object-store requests. Before adding read replicas, specify how they catch up to acknowledged writes. A cached or asynchronously refreshed reader is not automatically a strongly consistent query node.
-
-## Upgrades
-
-SlateDB is pinned to an exact version. Read its release notes, inspect API/format changes, then test recovery on a copied database before updating the pin and lockfile. Do not claim a storage migration is supported solely because the code compiles.
-
-Changes to keys, document serialization, or namespace configuration require an explicit format decision. `meta/format` rejects unrecognized formats. There is no migration command today.
+Changing the SlateDB dependency requires recovery/restore testing on a copy of data as well as compilation. GM's explicit v1-to-v2 migration covers its own document encoding; it does not guarantee arbitrary storage-library compatibility.

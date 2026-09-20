@@ -17,6 +17,16 @@ pub enum Error {
     NotFound(String),
     #[error("{0}")]
     Conflict(String),
+    #[error("{0}")]
+    Limit(String),
+    #[error("{0}")]
+    Corrupt(String),
+    #[error("node is not the active owner")]
+    Unavailable,
+    #[error("request deadline exceeded; a write may still commit")]
+    Timeout,
+    #[error("network request failed: {0}")]
+    Network(#[from] reqwest::Error),
     #[error("too many concurrent queries; retry later")]
     Busy,
     #[error("{0}")]
@@ -40,7 +50,18 @@ impl IntoResponse for Error {
             Self::Request(status, _) => (*status, "invalid_request", self.to_string()),
             Self::NotFound(_) => (StatusCode::NOT_FOUND, "not_found", self.to_string()),
             Self::Conflict(_) => (StatusCode::CONFLICT, "conflict", self.to_string()),
+            Self::Limit(_) => (
+                StatusCode::TOO_MANY_REQUESTS,
+                "limit_exceeded",
+                self.to_string(),
+            ),
+            Self::Unavailable | Self::Network(_) => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "unavailable",
+                "Active owner unavailable; a failed write may still have committed.".into(),
+            ),
             Self::Busy => (StatusCode::SERVICE_UNAVAILABLE, "busy", self.to_string()),
+            Self::Timeout => (StatusCode::GATEWAY_TIMEOUT, "timeout", self.to_string()),
             Self::Storage(_) | Self::ObjectStore(_) => {
                 tracing::error!(error = %self, "storage request failed");
                 (

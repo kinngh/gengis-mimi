@@ -37,6 +37,7 @@ pub async fn engine(dir: &TempDir, metric: Metric) -> Engine {
             NamespaceConfig {
                 dimensions: Some(2),
                 metric,
+                text_fields: vec![],
             },
         )
         .await
@@ -67,5 +68,7 @@ pub fn query(vector: [f32; 2], top_k: usize) -> QueryRequest {
         vector: vector.to_vec(),
         top_k,
         filter: Filter::default(),
+        mode: gengis_mimi::model::SearchMode::Auto,
+        probes: 4,
     }
 }

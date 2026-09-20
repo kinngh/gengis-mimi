@@ -1,0 +1,18 @@
+# Workers sharing a shard use the same storage prefix and separate caches.
+[server]
+bind = "127.0.0.1:8782"
+[storage]
+type = "s3"
+bucket = "gengis-mimi"
+region = "us-east-1"
+endpoint = "http://127.0.0.1:9000"
+allow_http = true
+
+[database]
+prefix = "gengis-mimi/cluster/shard-a"
+cache_dir = "./.cache/worker-a-standby"
+
+[cluster]
+role = "worker"
+node_id = "worker-a-standby"
+lease_ms = 9000

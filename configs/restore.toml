@@ -1,0 +1,6 @@
+# An empty destination for an offline restore. Choose a fresh prefix/cache.
+[storage]
+type = "local"
+path = "./restored-data"
+[database]
+prefix = "gengis-mimi/restored"

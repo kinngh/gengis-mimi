@@ -94,6 +94,13 @@ async fn acknowledged_batch_survives_process_kill_and_empty_cache_restart() {
         .unwrap()
         .error_for_status()
         .unwrap();
+    client
+        .post(format!("{address}/v1/namespaces/demo/index"))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
     client.post(format!("{address}/v1/namespaces/demo/write")).json(&json!({"upsert":[{"id":"keep","vector":[0,1],"attributes":{"revision":2}}],"delete":["gone"]})).send().await.unwrap().error_for_status().unwrap();
     // Drop uses kill(), not SIGTERM: no graceful flush or shutdown runs.
     drop(server);
